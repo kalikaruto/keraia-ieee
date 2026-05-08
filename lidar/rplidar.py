@@ -1,171 +1,266 @@
-from machine import UART, Pin
+"""
+rplidar.py — MicroPython RPLidar library (no WiFi)
+===================================================
+Usage:
+    from machine import UART, Pin
+    from rplidar import RPLidar
+
+    uart = UART(2, baudrate=115200, tx=17, rx=16)
+    lidar = RPLidar(uart)
+
+    for scan in lidar.iter_scans():
+        for (quality, angle, distance) in scan:
+            print(quality, angle, distance)
+
+    lidar.stop()
+    lidar.disconnect()
+"""
+
 import time
 
-# --- Setup ---
-uart = UART(0, baudrate=115200, tx=Pin(0), rx=Pin(1))
-motor = Pin(2, Pin.OUT)
+# ---------------------------------------------------------------------------
+# Protocol constants
+# ---------------------------------------------------------------------------
+_SYNC_BYTE      = 0xA5
+_SYNC_BYTE2     = 0x5A
+_CMD_STOP       = 0x25
+_CMD_RESET      = 0x40
+_CMD_SCAN       = 0x20
+_CMD_FORCE_SCAN = 0x21
+_CMD_GET_INFO   = 0x50
+_CMD_GET_HEALTH = 0x52
 
-# --- Constants ---
-SYNC_BYTE  = 0xA5
-SYNC_BYTE2 = 0x5A
-CMD_STOP   = 0x25
-CMD_RESET  = 0x40
-CMD_SCAN   = 0x20
-CMD_EXPRESS_SCAN = 0x82
-CMD_GET_INFO     = 0x50
-CMD_GET_HEALTH   = 0x52
+_DESCRIPTOR_LEN = 7
+_INFO_LEN       = 20
+_HEALTH_LEN     = 3
+_SCAN_LEN       = 5
 
-DESCRIPTOR_LEN = 7
-SCAN_DATA_LEN  = 5
-
-
-def send_command(cmd):
-    uart.write(bytes([SYNC_BYTE, cmd]))
+_STATUS = {0: 'Good', 1: 'Warning', 2: 'Error'}
 
 
-def stop_scan():
-    send_command(CMD_STOP)
-    time.sleep_ms(100)
-    uart.read()  # flush
+# ---------------------------------------------------------------------------
+# Exception
+# ---------------------------------------------------------------------------
+class RPLidarException(Exception):
+    pass
 
 
-def reset_lidar():
-    send_command(CMD_RESET)
-    time.sleep_ms(500)
-    uart.read()  # flush
-
-
-def read_descriptor():
-    """Read and validate 7-byte response descriptor."""
-    buf = uart.read(DESCRIPTOR_LEN)
-    if buf is None or len(buf) < DESCRIPTOR_LEN:
-        return None
-    if buf[0] != SYNC_BYTE or buf[1] != SYNC_BYTE2:
-        print(f"Bad descriptor sync: {buf.hex()}")
-        return None
-    data_len  = buf[2] | (buf[3] << 8) | (buf[4] << 16) | (buf[5] << 24)
-    data_type = buf[6]
-    return data_len, data_type
-
-
-def get_health():
-    stop_scan()
-    send_command(CMD_GET_HEALTH)
-    time.sleep_ms(100)
-    desc = read_descriptor()
-    if desc is None:
-        print("No health descriptor")
-        return
-    data = uart.read(3)
-    if data and len(data) == 3:
-        status = data[0]
-        error_code = data[1] | (data[2] << 8)
-        labels = {0: "Good", 1: "Warning", 2: "Error"}
-        print(f"Health: {labels.get(status, 'Unknown')}  Error code: {error_code}")
-
-
-def get_info():
-    stop_scan()
-    send_command(CMD_GET_INFO)
-    time.sleep_ms(100)
-    desc = read_descriptor()
-    if desc is None:
-        print("No info descriptor")
-        return
-    data = uart.read(20)
-    if data and len(data) == 20:
-        model    = data[0]
-        fw_minor = data[1]
-        fw_major = data[2]
-        hw       = data[3]
-        serial   = data[4:].hex()
-        print(f"Model: {model}  FW: {fw_major}.{fw_minor}  HW: {hw}  Serial: {serial}")
-
-
-def parse_scan_packet(raw):
+# ---------------------------------------------------------------------------
+# Main class
+# ---------------------------------------------------------------------------
+class RPLidar:
     """
-    Parse one 5-byte standard scan packet.
-    Returns (quality, angle_deg, distance_mm) or None on error.
+    Parameters
+    ----------
+    port : UART
+        A pre-configured MicroPython UART instance.
+    timeout : float
+        Read timeout in seconds (default 1.0).
     """
-    if len(raw) < SCAN_DATA_LEN:
-        return None
 
-    # Byte 0: quality (bits 7-2), S (bit 1), S_bar (bit 0)
-    s     = (raw[0] >> 0) & 0x01
-    s_bar = (raw[0] >> 1) & 0x01
-    if s == s_bar:          # start-bit check
-        return None
-    quality = raw[0] >> 2
+    def __init__(self, port, timeout=1.0):
+        self._uart       = port
+        self._timeout_ms = int(timeout * 1000)
+        self._scanning   = False
 
-    # Byte 1-2: angle (15 bits, Q6)
-    if not (raw[1] & 0x01):  # check bit must be 1
-        return None
-    angle_q6 = ((raw[1] >> 1) | (raw[2] << 7)) & 0x7FFF
-    angle = angle_q6 / 64.0
+    # ------------------------------------------------------------------
+    # Public API  (rplidar-roboticia compatible)
+    # ------------------------------------------------------------------
 
-    # Byte 3-4: distance (16 bits, Q2 in mm)
-    distance_q2 = raw[3] | (raw[4] << 8)
-    distance = distance_q2 / 4.0
+    def disconnect(self):
+        """Stop scanning and release resources."""
+        self.stop()
+        self._uart = None
 
-    return quality, angle, distance
+    def reset(self):
+        """Hard-reset the sensor (~2 s recovery time)."""
+        self._send(bytes([_SYNC_BYTE, _CMD_RESET]))
+        time.sleep_ms(2000)
+        self._flush(500)
+        self._scanning = False
 
+    def get_info(self):
+        """
+        Returns
+        -------
+        dict: model, firmware, hardware, serialnumber
+        """
+        self._send(bytes([_SYNC_BYTE, _CMD_GET_INFO]))
+        try:
+            self._read_descriptor(500)
+            raw = self._read_bytes(_INFO_LEN, 500)
+        except RPLidarException:
+            return {'model': 0, 'firmware': (0, 0),
+                    'hardware': 0, 'serialnumber': '0' * 32}
+        return {
+            'model':        raw[0],
+            'firmware':     (raw[2], raw[1]),
+            'hardware':     raw[3],
+            'serialnumber': ''.join('{:02X}'.format(b) for b in raw[4:20]),
+        }
 
-def start_scan():
-    stop_scan()
-    time.sleep_ms(50)
+    def get_health(self):
+        """
+        Returns
+        -------
+        (status : str, error_code : int)
+            status is 'Good', 'Warning', or 'Error'.
+        """
+        self._send(bytes([_SYNC_BYTE, _CMD_GET_HEALTH]))
+        try:
+            self._read_descriptor(500)
+            raw = self._read_bytes(_HEALTH_LEN, 500)
+        except RPLidarException:
+            return ('Good', 0)
+        return (_STATUS.get(raw[0], 'Error'), raw[1] | (raw[2] << 8))
 
-    motor.value(1)          # spin up motor
-    time.sleep_ms(500)
+    def start(self, scan='normal'):
+        """
+        Start the scan.
 
-    send_command(CMD_SCAN)
-    time.sleep_ms(100)
+        Parameters
+        ----------
+        scan : str
+            'normal' (default) or 'force'.
+        """
+        cmd = _CMD_FORCE_SCAN if scan == 'force' else _CMD_SCAN
+        self._send(bytes([_SYNC_BYTE, cmd]))
+        self._read_descriptor(2000)
+        self._scanning = True
 
-    desc = read_descriptor()
-    if desc is None:
-        print("ERROR: No scan descriptor received.")
-        return False
-    print(f"Scan descriptor OK — type=0x{desc[1]:02X}")
-    return True
+    def stop(self):
+        """Stop scanning and put sensor into idle state."""
+        if not self._scanning:
+            return
+        self._send(bytes([_SYNC_BYTE, _CMD_STOP]))
+        time.sleep_ms(150)
+        self._flush(200)
+        self._scanning = False
 
+    def iter_measurements(self, max_buf_meas=500):
+        """
+        Generator — yields one measurement at a time.
 
-# --- Main ---
-print("=== RPLidar A1M8 - MicroPython ===")
-reset_lidar()
-get_info()
-get_health()
+        Yields
+        ------
+        (new_scan : bool, quality : int, angle : float, distance : float)
+        """
+        if not self._scanning:
+            self.start()
 
-print("\nStarting scan...\n")
-if not start_scan():
-    motor.value(0)
-    raise SystemExit
+        buf = bytearray()
 
-scan_count = 0
-buf = bytearray()
+        while True:
+            chunk = self._uart.read(128)
+            if chunk:
+                buf += chunk
 
-try:
-    while True:
-        # Read available bytes into rolling buffer
-        chunk = uart.read(32)
-        if chunk:
-            buf += chunk
+            if len(buf) > max_buf_meas * _SCAN_LEN:
+                buf = bytearray()
+                continue
 
-        # Process complete 5-byte packets from buffer
-        while len(buf) >= SCAN_DATA_LEN:
-            result = parse_scan_packet(buf)
-            if result:
-                quality, angle, distance = result
-                buf = buf[SCAN_DATA_LEN:]  # consume packet
-                scan_count += 1
+            while len(buf) >= _SCAN_LEN:
+                result = _parse(buf[:_SCAN_LEN])
+                if result is not None:
+                    buf = buf[_SCAN_LEN:]
+                    yield result
+                else:
+                    buf = buf[1:]
 
-                # Only print non-zero distance readings
-                if distance > 0:
-                    print(f"#{scan_count:05d} | Angle: {angle:6.2f}°  Dist: {distance:7.1f} mm  Quality: {quality}")
+    def iter_scans(self, max_buf_meas=500, min_len=5):
+        """
+        Generator — yields one complete 360 degree scan at a time.
+
+        Yields
+        ------
+        list of (quality : int, angle : float, distance : float)
+
+        Parameters
+        ----------
+        max_buf_meas : int
+            Drop buffer if it exceeds this many un-parsed measurements.
+        min_len : int
+            Minimum measurements required before yielding a scan.
+        """
+        scan = []
+        for new_scan, quality, angle, distance in \
+                self.iter_measurements(max_buf_meas):
+            if new_scan and len(scan) >= min_len:
+                yield scan
+                scan = []
+            if distance > 0:
+                scan.append((quality, angle, distance))
+
+    # ------------------------------------------------------------------
+    # Context manager
+    # ------------------------------------------------------------------
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.disconnect()
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+    def _send(self, data):
+        self._uart.write(data)
+
+    def _flush(self, duration_ms=200):
+        deadline = time.ticks_add(time.ticks_ms(), duration_ms)
+        while time.ticks_diff(deadline, time.ticks_ms()) > 0:
+            if not self._uart.read(128):
+                time.sleep_ms(10)
+
+    def _read_bytes(self, n, timeout_ms=None):
+        timeout_ms = timeout_ms or self._timeout_ms
+        buf = bytearray()
+        deadline = time.ticks_add(time.ticks_ms(), timeout_ms)
+        while len(buf) < n:
+            if time.ticks_diff(deadline, time.ticks_ms()) <= 0:
+                raise RPLidarException(
+                    'Read timeout ({}/{} bytes)'.format(len(buf), n))
+            chunk = self._uart.read(n - len(buf))
+            if chunk:
+                buf += chunk
             else:
-                # Sync lost — skip one byte and re-align
-                buf = buf[1:]
+                time.sleep_ms(5)
+        return bytes(buf)
 
-except KeyboardInterrupt:
-    print("\nStopped by user.")
-    stop_scan()
-    motor.value(0)
+    def _read_descriptor(self, timeout_ms=None):
+        timeout_ms = timeout_ms or self._timeout_ms
+        buf = bytearray()
+        deadline = time.ticks_add(time.ticks_ms(), timeout_ms)
+        while time.ticks_diff(deadline, time.ticks_ms()) > 0:
+            b = self._uart.read(1)
+            if not b:
+                time.sleep_ms(5)
+                continue
+            buf += b
+            if len(buf) > _DESCRIPTOR_LEN:
+                buf = buf[-_DESCRIPTOR_LEN:]
+            if (len(buf) == _DESCRIPTOR_LEN
+                    and buf[0] == _SYNC_BYTE
+                    and buf[1] == _SYNC_BYTE2):
+                return buf[6]
+        raise RPLidarException('Descriptor timeout')
 
+
+# ---------------------------------------------------------------------------
+# Module-level packet parser
+# ---------------------------------------------------------------------------
+def _parse(raw):
+    """
+    Parse a 5-byte scan packet.
+    Returns (new_scan, quality, angle, distance) or None if invalid.
+    """
+    s     = raw[0] & 0x01
+    s_bar = (raw[0] >> 1) & 0x01
+    if s == s_bar:
+        return None
+    if not (raw[1] & 0x01):
+        return None
+    quality  = raw[0] >> 2
+    angle    = (((raw[1] >> 1) | (raw[2] << 7)) & 0x7FFF) / 64.0
+    distance = (raw[3] | (raw[4] << 8)) / 4.0
+    return bool(s), quality, angle, distance

@@ -54,14 +54,121 @@ class RPLidar:
     ----------
     port : UART
         A pre-configured MicroPython UART instance.
+    motor_pin : Pin, optional
+        A machine.Pin instance controlling the motor. If provided,
+        start_device() / stop_device() will manage it automatically.
     timeout : float
         Read timeout in seconds (default 1.0).
     """
 
-    def __init__(self, port, timeout=1.0):
+    def __init__(self, port, motor_pin=None, timeout=1.0):
         self._uart       = port
+        self._motor      = motor_pin
         self._timeout_ms = int(timeout * 1000)
         self._scanning   = False
+
+    # ------------------------------------------------------------------
+    # Hardware-level startup / shutdown (motor + full init sequence)
+    # ------------------------------------------------------------------
+
+    def start_device(self):
+        """
+        Full hardware startup sequence:
+          1. Motor off
+          2. Stop any running scan + reset sensor
+          3. Motor on, wait for spin-up
+          4. Send SCAN command + read descriptor
+
+        Returns
+        -------
+        bool : True on success, False on failure.
+        """
+        if self._motor:
+            self._motor.value(0)
+
+        print("Resetting lidar...")
+        self.stop()
+        self.reset()          # CMD_RESET + 2 s sleep + flush
+
+        print("Starting motor...")
+        if self._motor:
+            self._motor.value(1)
+        time.sleep_ms(1000)   # let motor reach speed
+
+        print("Sending SCAN command...")
+        try:
+            self.start()      # CMD_SCAN + read descriptor
+        except RPLidarException as e:
+            print(f"Lidar start ERROR: {e}")
+            return False
+
+        print("Lidar ready — scanning!")
+        return True
+
+    def stop_device(self):
+        """
+        Full hardware shutdown:
+          1. Stop scanning (CMD_STOP + flush)
+          2. Motor off
+        """
+        self.stop()
+        if self._motor:
+            self._motor.value(0)
+
+    # ------------------------------------------------------------------
+    # Raw streaming generator (used by main.py for socket streaming)
+    # ------------------------------------------------------------------
+
+    def iter_raw_scans(self):
+        """
+        Generator — yields one complete 360° scan at a time as a
+        pre-formatted string payload ready to send over a socket.
+
+        Uses manual angle-wrap detection (359 → ~0) identical to the
+        original main.py logic, avoiding any dependency on the new_scan
+        bit which can be unreliable on some A1M8 units.
+
+        Yields
+        ------
+        str
+            Multi-line string, one "quality,angle,distance" per line,
+            terminated with "---\\n" as a scan boundary marker.
+            e.g.
+                "15,0.34,423.5\\n"
+                "15,1.06,421.0\\n"
+                ...
+                "---\\n"
+        """
+        buf         = bytearray()
+        scan_points = []
+        last_angle  = 0
+
+        while True:
+            chunk = self._uart.read(128)
+            if chunk:
+                buf += chunk
+
+            while len(buf) >= _SCAN_LEN:
+                result = _parse(buf[:_SCAN_LEN])
+                if result is not None:
+                    _, quality, angle, distance = result
+                    buf = buf[_SCAN_LEN:]
+
+                    # Detect scan boundary: angle wraps 359 → ~0
+                    if angle < 10 and last_angle > 300 and scan_points:
+                        payload = ""
+                        for q, a, d in scan_points:
+                            payload += f"{q},{a:.2f},{d:.1f}\n"
+                        payload += "---\n"
+                        yield payload
+                        scan_points = []
+
+                    if distance > 0:
+                        scan_points.append((quality, angle, distance))
+
+                    last_angle = angle
+                else:
+                    buf = buf[1:]  # re-sync on bad byte
 
     # ------------------------------------------------------------------
     # Public API  (rplidar-roboticia compatible)
@@ -264,3 +371,5 @@ def _parse(raw):
     angle    = (((raw[1] >> 1) | (raw[2] << 7)) & 0x7FFF) / 64.0
     distance = (raw[3] | (raw[4] << 8)) / 4.0
     return bool(s), quality, angle, distance
+
+

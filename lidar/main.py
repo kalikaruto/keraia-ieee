@@ -1,114 +1,75 @@
-from machine import UART, Pin
-from rplidar import RPLidar
+import network
+import socket
 import time
+from machine import UART, Pin
+from rplidar import RPLidar, RPLidarException
 
-# -----------------------------
-# GPS UART
-# -----------------------------
-gps_uart = UART(
-    1,
-    baudrate=9600,
-    tx=5,
-    rx=4
-)
+# --- Config ---
+SSID     = "Smart Devices"
+PASSWORD = "Devices@2023"
+PORT     = 5000
 
-# -----------------------------
-# LIDAR UART
-# -----------------------------
-lidar_uart = UART(
-    2,
-    baudrate=115200,
-    tx=17,   # TX2
-    rx=16    # RX2
-)
-
-# -----------------------------
-# Motor control
-# -----------------------------
-motor_pin = Pin(25, Pin.OUT)
-motor_pin.on()   # start motor
-
-# -----------------------------
-# Initialize lidar
-# -----------------------------
-lidar = RPLidar(lidar_uart)
-
-print("Starting lidar...")
-time.sleep(2)
-
-DIST_THRESHOLD = 150  # mm
+# --- Hardware ---
+uart  = UART(0, baudrate=115200, tx=Pin(0), rx=Pin(1))
+motor = Pin(2, Pin.OUT)
 
 
-# -----------------------------
-# GPS helper
-# -----------------------------
-def get_gps():
-    """
-    Very simple NMEA parser.
-    Extracts lat/lon from GPGGA.
-    """
-
-    if gps_uart.any():
-        line = gps_uart.readline()
-
-        if line:
-            try:
-                line = line.decode('utf-8')
-
-                if "$GPGGA" in line:
-                    parts = line.split(',')
-
-                    if len(parts) > 5:
-                        lat = parts[2]
-                        lat_dir = parts[3]
-
-                        lon = parts[4]
-                        lon_dir = parts[5]
-
-                        return lat, lat_dir, lon, lon_dir
-
-            except:
-                pass
-
+def connect_wifi():
+    wlan = network.WLAN(network.STA_IF)
+    wlan.active(True)
+    wlan.connect(SSID, PASSWORD)
+    print("Connecting to WiFi", end="")
+    for _ in range(20):
+        if wlan.isconnected():
+            break
+        print(".", end="")
+        time.sleep(1)
+    if wlan.isconnected():
+        ip = wlan.ifconfig()[0]
+        print(f"\nConnected! Pico IP: {ip}")
+        return ip
+    print("\nWiFi failed!")
     return None
 
 
-# -----------------------------
-# Main loop
-# -----------------------------
+# ── STEP 1: Start lidar FIRST ───────────────────────────────────────────────
+lidar = RPLidar(uart, motor_pin=motor)
+
+if not lidar.start_device():
+    raise SystemExit("Lidar failed to start")
+
+# ── STEP 2: Connect WiFi ────────────────────────────────────────────────────
+ip = connect_wifi()
+if ip is None:
+    lidar.stop_device()
+    raise SystemExit("WiFi failed")
+
+# ── STEP 3: Wait for laptop ─────────────────────────────────────────────────
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server.bind(('0.0.0.0', PORT))
+server.listen(1)
+print(f"Waiting for laptop on {ip}:{PORT} ...")
+
+conn, addr = server.accept()
+conn.setblocking(False)
+print(f"Laptop connected from {addr}")
+
+# ── STEP 4: Stream scan data ────────────────────────────────────────────────
 try:
-
-    for scan in lidar.iter_scans():
-
-        for (_, angle, distance) in scan:
-
-            if distance > 0 and distance < DIST_THRESHOLD:
-
-                print("⚠ Object detected")
-                print("Distance:", distance, "mm")
-                print("Angle:", angle)
-
-                gps = get_gps()
-
-                if gps:
-                    lat, lat_dir, lon, lon_dir = gps
-
-                    print("GPS:")
-                    print("Lat:", lat, lat_dir)
-                    print("Lon:", lon, lon_dir)
-
-                else:
-                    print("GPS not locked")
-
-                print("-------------------")
-
-                time.sleep(1)
+    for payload in lidar.iter_raw_scans():
+        try:
+            conn.sendall(payload.encode())
+        except OSError:
+            print("Client disconnected")
+            break
 
 except KeyboardInterrupt:
     print("Stopping...")
 
 finally:
-    lidar.stop()
-    lidar.disconnect()
-    motor_pin.off()
+    lidar.stop_device()
+    conn.close()
+    server.close()
+    print("Done.")
 

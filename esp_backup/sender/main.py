@@ -24,8 +24,8 @@ ANGLE_RIGHT          = 45    # scan cone right bound (degrees)
 # ---------------------------------------------------------------------------
 # Hardware
 # ---------------------------------------------------------------------------
-uart  = UART(2, baudrate=115200, tx=Pin(17), rx=Pin(16))
-motor = Pin(4, Pin.OUT)
+uart  = UART(2, baudrate=115200, tx=Pin(1), rx=Pin(3))
+motor = Pin(23, Pin.OUT)
 
 # ---------------------------------------------------------------------------
 # Pothole detection (mirrors laptop-side logic, no numpy)

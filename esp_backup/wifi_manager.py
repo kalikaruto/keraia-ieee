@@ -148,6 +148,3 @@ class WiFiManager:
 
     def on_receive(self, callback):
         self.rx_callback = callback
-
-
-

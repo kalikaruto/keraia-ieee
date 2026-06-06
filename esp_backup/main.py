@@ -3,6 +3,7 @@ from machine import UART, Pin
 from rplidar import RPLidar
 from wifi_manager import WiFiManager
 from gps import GPS
+from oled import OLED
 import math
 import json
 
@@ -137,6 +138,7 @@ lidar = RPLidar(uart, motor_pin=motor)
 if not lidar.start_device():
     raise SystemExit("Lidar failed to start")
 gps = GPS()
+oled = OLED()
 
 # ---------------------------------------------------------------------------
 # STEP 2: Start WiFi and wait for client
@@ -171,6 +173,7 @@ try:
 
         if not scan_points:
             continue
+        oled.center_text("POTHOLE RECORDED", 32)
         summary = {}
         if gps.update():
             if gps.has_fix():

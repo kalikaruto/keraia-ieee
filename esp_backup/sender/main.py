@@ -112,6 +112,8 @@ def build_payload(potholes, baseline, n_points, gps_summary):
             {"cx": <float>, "depth": <float>, "width": <float>},
             ...
         ]
+        "latitude" : <float>
+        "longitude": <float>
     }
     """
     return json.dumps({
@@ -178,7 +180,8 @@ try:
         if gps.update():
             if gps.has_fix():
                 summary = gps.summary()
-                print(gps.summary())
+                # print(gps.summary())
+                print(summary.get("latitude"), summary.get("longitude"), sep=", ")
         points             = process_scan(scan_points)
         potholes, baseline = detect_potholes(points)
         payload            = build_payload(potholes, baseline, len(points), summary)

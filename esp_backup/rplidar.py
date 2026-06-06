@@ -17,6 +17,7 @@ Usage:
 """
 
 import time
+import oled
 
 # ---------------------------------------------------------------------------
 # Protocol constants
@@ -87,6 +88,7 @@ class RPLidar:
             self._motor.value(0)
 
         print("Resetting lidar...")
+        oled.oled.center_error("Resetting lidar", 32)
         self.stop()
         self.reset()          # CMD_RESET + 2 s sleep + flush
 
@@ -96,10 +98,15 @@ class RPLidar:
         time.sleep_ms(1000)   # let motor reach speed
 
         print("Sending SCAN command...")
+        oled.oled.clear_buf()
+        oled.oled.center_text("Starting SCAN", 32)
         try:
             self.start()      # CMD_SCAN + read descriptor
         except RPLidarException as e:
             print(f"Lidar start ERROR: {e}")
+            oled.oled.clear_buf()
+            oled.oled.center_error("Lidar ERROR", 21)
+            oled.oled.center_error(e, 42)
             return False
 
         print("Lidar ready — scanning!")

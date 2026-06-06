@@ -4,6 +4,7 @@ import network
 import socket
 import time
 import _thread
+import oled
 
 
 class WiFiManager:
@@ -54,12 +55,15 @@ class WiFiManager:
             time.sleep(0.1)
         print("AP READY")
         print(ap.ifconfig())
+        oled.oled.clear_buf()
+        oled.oled.center_text("AP Ready", 21)
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.bind(('', self.port))          # '' instead of specific IP
         self.sock.listen(1)
         print("WAITING FOR CLIENT")
+        oled.oled.center_text("Waiting For Client", 42)
 
         while True:
             try:
@@ -81,16 +85,20 @@ class WiFiManager:
         if not sta.isconnected():
 
             sta.connect(self.ssid, self.password)
-
+            oled.oled.clear_buf()
+            oled.oled.center_text("CONNECTING...", 21)
             while not sta.isconnected():
                 print("CONNECTING...")
                 time.sleep(1)
 
         print("CONNECTED")
+        oled.oled.center_text("CONNECTED", 42)
         print(sta.ifconfig())
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
+        oled.oled.clear_buf()
+        oled.oled.center_text("WAITING FOR SERVER", 21)
         while True:
 
             try:
@@ -102,6 +110,7 @@ class WiFiManager:
                 time.sleep(1)
 
         print("SERVER CONNECTED")
+        oled.oled.center_text("SERVER CONNECTED", 42)
 
         _thread.start_new_thread(self._rx_loop, ())
 

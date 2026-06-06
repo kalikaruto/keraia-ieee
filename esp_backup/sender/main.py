@@ -1,11 +1,10 @@
-import time
 from machine import UART, Pin
 from rplidar import RPLidar
 from wifi_manager import WiFiManager
 from gps import GPS
-from oled import OLED
 import math
 import json
+import oled
 
 # ---------------------------------------------------------------------------
 # Config
@@ -25,7 +24,7 @@ ANGLE_RIGHT          = 45    # scan cone right bound (degrees)
 # Hardware
 # ---------------------------------------------------------------------------
 uart  = UART(2, baudrate=115200, tx=Pin(1), rx=Pin(3))
-motor = Pin(23, Pin.OUT)
+motor = Pin(24, Pin.OUT)
 
 # ---------------------------------------------------------------------------
 # Pothole detection (mirrors laptop-side logic, no numpy)
@@ -135,12 +134,12 @@ def build_payload(potholes, baseline, n_points, gps_summary):
 # ---------------------------------------------------------------------------
 # STEP 1: Start lidar FIRST
 # ---------------------------------------------------------------------------
+oled.init()
 lidar = RPLidar(uart, motor_pin=motor)
 
 if not lidar.start_device():
     raise SystemExit("Lidar failed to start")
 gps = GPS()
-oled = OLED()
 
 # ---------------------------------------------------------------------------
 # STEP 2: Start WiFi and wait for client

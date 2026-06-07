@@ -23,9 +23,8 @@ ANGLE_RIGHT          = 45    # scan cone right bound (degrees)
 # ---------------------------------------------------------------------------
 # Hardware
 # ---------------------------------------------------------------------------
-uart  = UART(2, baudrate=115200, tx=Pin(1), rx=Pin(3))
-motor = Pin(24, Pin.OUT)
-
+uart  = UART(1, baudrate=115200, tx=Pin(19), rx=Pin(18))
+motor = Pin(23, Pin.OUT)
 # ---------------------------------------------------------------------------
 # Pothole detection (mirrors laptop-side logic, no numpy)
 # ---------------------------------------------------------------------------
@@ -174,7 +173,9 @@ try:
 
         if not scan_points:
             continue
-        oled.center_text("POTHOLE RECORDED", 32)
+        oled.oled.clear_buf()
+        oled.oled.oled.text("POTHOLE RECORDED", 12, 32, 1)
+        oled.oled.show()
         summary = {}
         if gps.update():
             if gps.has_fix():
@@ -193,3 +194,4 @@ except KeyboardInterrupt:
 finally:
     lidar.stop_device()
     print("Done.")
+

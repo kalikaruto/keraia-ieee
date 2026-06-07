@@ -14,4 +14,4 @@ class OLED:
     SCL = 22
 
     WIDTH = 128
-    HEIGHT = 128
+    HEIGHT = 64

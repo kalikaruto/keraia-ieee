@@ -88,7 +88,8 @@ class RPLidar:
             self._motor.value(0)
 
         print("Resetting lidar...")
-        oled.oled.center_error("Resetting lidar", 32)
+        oled.oled.oled.text("Resetting lidar", 58, 32)
+        oled.oled.show()
         self.stop()
         self.reset()          # CMD_RESET + 2 s sleep + flush
 
@@ -99,14 +100,17 @@ class RPLidar:
 
         print("Sending SCAN command...")
         oled.oled.clear_buf()
-        oled.oled.center_text("Starting SCAN", 32)
+        oled.oled.oled.text("Starting SCAN", 58, 32)
+        oled.oled.show()
         try:
             self.start()      # CMD_SCAN + read descriptor
         except RPLidarException as e:
             print(f"Lidar start ERROR: {e}")
             oled.oled.clear_buf()
-            oled.oled.center_error("Lidar ERROR", 21)
-            oled.oled.center_error(e, 42)
+            oled.oled.oled.invert(1)
+            oled.oled.oled.text("Lidar ERROR", 55, 21)
+            oled.oled.oled.text(e, 55, 42)
+            oled.oled.show()
             return False
 
         print("Lidar ready — scanning!")

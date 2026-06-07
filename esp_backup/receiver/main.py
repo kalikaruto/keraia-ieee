@@ -1,6 +1,6 @@
 import time
 from wifi_manager import WiFiManager
-from oled import OLED
+import oled
 import json
 
 # ---------------------------------------------------------------------------
@@ -12,6 +12,7 @@ PASSWORD  = "lidar1234"
 SERVER_IP = "192.168.4.1"   # sender ESP32 AP IP
 PORT      = 5000
 
+oled.init()
 # ---------------------------------------------------------------------------
 # WiFi
 # ---------------------------------------------------------------------------
@@ -23,7 +24,6 @@ wifi = WiFiManager(
     port=PORT,
 )
 
-oled = OLED()
 # ---------------------------------------------------------------------------
 # RX callback — called by WiFiManager._rx_loop on every received message
 # ---------------------------------------------------------------------------
@@ -50,11 +50,14 @@ def on_data(msg):
 
     if not potholes:
         print("")
-        oled.reset()
+        oled.oled.reset()
     else:
         print("Pothole ahead")
         print(f"N: {n}, baseline: {baseline:.1f} mm ({abs(baseline):.0f} mm above ground), latitude: {latitude:.2f}, longitude: {longitude:.2f}")
-        oled.center_text("POTHOLE AHEAD", 32)
+        oled.oled.clear_buf()
+        oled.oled.oled.invert(0)
+        oled.oled.oled.text("POTHOLE AHEAD", 12)
+        oled.oled.show()
 
 # ---------------------------------------------------------------------------
 # Start

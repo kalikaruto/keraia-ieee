@@ -3,6 +3,7 @@ import socket
 import ujson
 import time
 import _thread
+import oled
 
 import oled
 
@@ -263,6 +264,8 @@ class WiFiManager:
             socket.SOCK_STREAM
         )
 
+        oled.oled.clear_buf()
+        oled.oled.center_text("WAITING FOR SERVER", 21)
         while True:
 
             try:

@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RoadSense — Infrastructure Monitoring</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+<!-- ═══════════════════════ SIDEBAR ═══════════════════════ -->
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <div class="brand-icon">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+        <path d="M2 10 L10 2 L18 10 L10 18 Z" stroke="var(--accent)" stroke-width="1.5" fill="none"/>
+        <circle cx="10" cy="10" r="2.5" fill="var(--accent)"/>
+        <line x1="10" y1="4" x2="10" y2="8" stroke="var(--accent)" stroke-width="1"/>
+        <line x1="10" y1="12" x2="10" y2="16" stroke="var(--accent)" stroke-width="1"/>
+        <line x1="4" y1="10" x2="8" y2="10" stroke="var(--accent)" stroke-width="1"/>
+        <line x1="12" y1="10" x2="16" y2="10" stroke="var(--accent)" stroke-width="1"/>
+      </svg>
+    </div>
+    <div>
+      <div class="brand-name">RoadSense</div>
+      <div class="brand-sub">AP-S LiDAR Platform</div>
+    </div>
+  </div>
+
+  <nav class="sidebar-nav">
+    <a class="nav-item active" data-screen="live" href="#">
+      <span class="nav-icon">⬡</span>
+      <span>Live Monitor</span>
+    </a>
+    <a class="nav-item" data-screen="database" href="#">
+      <span class="nav-icon">⬡</span>
+      <span>Pothole Database</span>
+    </a>
+    <a class="nav-item" data-screen="analytics" href="#">
+      <span class="nav-icon">⬡</span>
+      <span>Analytics</span>
+    </a>
+    <a class="nav-item" data-screen="map" href="#">
+      <span class="nav-icon">⬡</span>
+      <span>Map View</span>
+    </a>
+  </nav>
+
+  <div class="sidebar-status">
+    <div class="status-heading">System Status</div>
+    <div class="status-row">
+      <span class="status-dot" id="dot-esp32"></span>
+      <span class="status-label">ESP32</span>
+      <span class="status-value" id="val-esp32">—</span>
+    </div>
+    <div class="status-row">
+      <span class="status-dot" id="dot-lidar"></span>
+      <span class="status-label">LiDAR</span>
+      <span class="status-value" id="val-lidar">—</span>
+    </div>
+    <div class="status-row">
+      <span class="status-dot" id="dot-gps"></span>
+      <span class="status-label">GPS</span>
+      <span class="status-value" id="val-gps">—</span>
+    </div>
+  </div>
+
+  <div class="sidebar-actions">
+    <button class="btn-export" onclick="exportCSV()">
+      ↓ Infrastructure Report
+    </button>
+    <button class="btn-sim" onclick="simulate()">
+      ▶ Inject Test Data
+    </button>
+  </div>
+</aside>
+
+<!-- ═══════════════════════ MAIN ═══════════════════════ -->
+<main class="main">
+
+  <!-- ──────── SCREEN: LIVE ──────── -->
+  <section class="screen active" id="screen-live">
+    <header class="screen-header">
+      <div>
+        <h1 class="screen-title">Live Monitoring</h1>
+        <p class="screen-sub">Real-time pothole detection feed</p>
+      </div>
+      <div class="live-badge">
+        <span class="pulse-dot"></span>LIVE
+      </div>
+    </header>
+
+    <!-- KPI Row -->
+    <div class="kpi-row">
+      <div class="kpi-card">
+        <div class="kpi-label">Total Detected</div>
+        <div class="kpi-value" id="kpi-total">—</div>
+      </div>
+      <div class="kpi-card kpi-high">
+        <div class="kpi-label">High Severity</div>
+        <div class="kpi-value" id="kpi-high">—</div>
+      </div>
+      <div class="kpi-card kpi-medium">
+        <div class="kpi-label">Medium Severity</div>
+        <div class="kpi-value" id="kpi-medium">—</div>
+      </div>
+      <div class="kpi-card kpi-low">
+        <div class="kpi-label">Low Severity</div>
+        <div class="kpi-value" id="kpi-low">—</div>
+      </div>
+    </div>
+
+    <!-- Latest + Feed -->
+    <div class="live-grid">
+      <!-- Latest Detection -->
+      <div class="card latest-card">
+        <div class="card-header">Latest Detection</div>
+        <div id="latest-empty" class="empty-state">No detections yet</div>
+        <div id="latest-content" class="latest-content hidden">
+          <div class="latest-sev" id="latest-sev-badge">—</div>
+          <div class="latest-metrics">
+            <div class="metric">
+              <span class="metric-label">Depth</span>
+              <span class="metric-value" id="latest-depth">—</span>
+              <span class="metric-unit">mm</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Width</span>
+              <span class="metric-value" id="latest-width">—</span>
+              <span class="metric-unit">mm</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Lat</span>
+              <span class="metric-value" id="latest-lat">—</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Lon</span>
+              <span class="metric-value" id="latest-lon">—</span>
+            </div>
+          </div>
+          <div class="latest-ts" id="latest-ts">—</div>
+        </div>
+      </div>
+
+      <!-- Activity Feed -->
+      <div class="card feed-card">
+        <div class="card-header">Activity Feed</div>
+        <div id="activity-feed" class="feed-list">
+          <div class="empty-state">Waiting for detections…</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ──────── SCREEN: DATABASE ──────── -->
+  <section class="screen" id="screen-database">
+    <header class="screen-header">
+      <div>
+        <h1 class="screen-title">Pothole Database</h1>
+        <p class="screen-sub">Road maintenance record</p>
+      </div>
+    </header>
+
+    <div class="db-controls card">
+      <input class="db-search" type="text" id="db-search" placeholder="Search by ID, timestamp, severity…" oninput="filterTable()">
+      <div class="db-filters">
+        <button class="filter-btn active" data-sev="" onclick="setSevFilter(this, '')">All</button>
+        <button class="filter-btn high" data-sev="HIGH" onclick="setSevFilter(this, 'HIGH')">High</button>
+        <button class="filter-btn medium" data-sev="MEDIUM" onclick="setSevFilter(this, 'MEDIUM')">Medium</button>
+        <button class="filter-btn low" data-sev="LOW" onclick="setSevFilter(this, 'LOW')">Low</button>
+      </div>
+    </div>
+
+    <div class="card table-card">
+      <table class="db-table" id="db-table">
+        <thead>
+          <tr>
+            <th onclick="sortTable('id')">ID <span class="sort-arrow">↕</span></th>
+            <th onclick="sortTable('timestamp')">Timestamp <span class="sort-arrow">↕</span></th>
+            <th onclick="sortTable('depth_mm')">Depth (mm) <span class="sort-arrow">↕</span></th>
+            <th onclick="sortTable('width_mm')">Width (mm) <span class="sort-arrow">↕</span></th>
+            <th onclick="sortTable('severity')">Severity <span class="sort-arrow">↕</span></th>
+            <th>Latitude</th>
+            <th>Longitude</th>
+            <th onclick="sortTable('cx')">Cx (mm) <span class="sort-arrow">↕</span></th>
+          </tr>
+        </thead>
+        <tbody id="db-tbody">
+          <tr><td colspan="8" class="empty-state">No records</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ──────── SCREEN: ANALYTICS ──────── -->
+  <section class="screen" id="screen-analytics">
+    <header class="screen-header">
+      <div>
+        <h1 class="screen-title">Infrastructure Analytics</h1>
+        <p class="screen-sub">Aggregate road condition indicators</p>
+      </div>
+    </header>
+
+    <div class="analytics-kpi-row">
+      <div class="kpi-card">
+        <div class="kpi-label">Avg Depth</div>
+        <div class="kpi-value" id="an-avg-depth">—</div>
+        <div class="kpi-unit">mm</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Max Depth</div>
+        <div class="kpi-value" id="an-max-depth">—</div>
+        <div class="kpi-unit">mm</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Max Width</div>
+        <div class="kpi-value" id="an-max-width">—</div>
+        <div class="kpi-unit">mm</div>
+      </div>
+      <div class="kpi-card health-card">
+        <div class="kpi-label">Road Health Index</div>
+        <div class="kpi-value" id="an-health">—</div>
+        <div class="kpi-unit">/ 100</div>
+      </div>
+    </div>
+
+    <div class="charts-grid">
+      <div class="card chart-card">
+        <div class="card-header">Severity Distribution</div>
+        <canvas id="chart-severity"></canvas>
+      </div>
+      <div class="card chart-card">
+        <div class="card-header">Depth Distribution (mm)</div>
+        <canvas id="chart-depth"></canvas>
+      </div>
+      <div class="card chart-card chart-wide">
+        <div class="card-header">Detection Timeline</div>
+        <canvas id="chart-timeline"></canvas>
+      </div>
+    </div>
+  </section>
+
+  <!-- ──────── SCREEN: MAP ──────── -->
+  <section class="screen" id="screen-map">
+    <header class="screen-header">
+      <div>
+        <h1 class="screen-title">Map View</h1>
+        <p class="screen-sub">Pothole geographic distribution</p>
+      </div>
+    </header>
+    <div class="card map-container">
+      <div id="map"></div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ═══════════════════════ SCRIPTS ═══════════════════════ -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="/static/js/dashboard.js"></script>
+</body>
+</html>

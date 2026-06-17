@@ -1,5 +1,5 @@
 """
-rplidar.py — MicroPython RPLidar library (no WiFi)
+rplidar.py — MicroPython RPLidar library
 ===================================================
 Usage:
     from machine import UART, Pin
@@ -17,6 +17,7 @@ Usage:
 """
 
 import time
+from machine import Pin
 
 # ---------------------------------------------------------------------------
 # Protocol constants
@@ -63,7 +64,7 @@ class RPLidar:
 
     def __init__(self, port, motor_pin=None, timeout=1.0):
         self._uart       = port
-        self._motor      = motor_pin
+        self._motor      = Pin(motor_pin)
         self._timeout_ms = int(timeout * 1000)
         self._scanning   = False
 
